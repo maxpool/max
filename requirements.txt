@@ -1,0 +1,7 @@
+langchain-community
+langchain-openai
+langchain-perplexity
+langchain_google_genai
+langchain_anthropic
+discord.py
+python-dotenv

@@ -12,7 +12,12 @@ from llm_handler import LLMHandler
 from query_router import QueryRouter
 from chat_history import ChatHistory
 from query_rewriter import QueryRewriter
-from prompts import get_gemini_prompt, get_perplexity_prompt, get_clarification_message, get_reference_prompt, NON_AI_RESPONSE
+from prompts import (
+    get_gemini_prompt,
+    get_perplexity_prompt,
+    get_clarification_message,
+    get_reference_prompt,
+)
 from logger import handler_logger
 
 class BotHandler:
@@ -20,7 +25,7 @@ class BotHandler:
     Main handler for Max Discord Bot interactions.
     Integrates various components for routing and processing user queries.
     """
-    
+
     def __init__(self):
         """Initialize the Bot Handler with necessary components."""
         handler_logger.info("Initializing BotHandler")
@@ -30,7 +35,7 @@ class BotHandler:
         self.llm_handler.classifier_model = self.query_router.classifier_model
         self.chat_history = ChatHistory()
         self.query_rewriter = QueryRewriter()
-        
+
         # Default clarification questions for vague queries
         self.clarification_questions = {
             "general": "what specific information or help you're looking for?",
@@ -39,7 +44,7 @@ class BotHandler:
             "error": "what error message you're receiving and what you were trying to do?",
             "help": "what specific task or concept you need help with?",
         }
-        
+
         # Friendly greeting responses
         self.greeting_responses = [
             "Hey there! What's up in your AI adventures today? 🚀",
@@ -54,7 +59,7 @@ class BotHandler:
             "Greetings! Ready to dive into some AI discussions? 🤖"
         ]
         handler_logger.debug("BotHandler initialized with all components")
-        
+
     async def process_message(self, 
                              user_id: str, 
                              channel_id: str, 
@@ -84,18 +89,18 @@ class BotHandler:
         handler_logger.debug(f"Processing message from user {user_id}: '{message_content[:50]}...'")
         handler_logger.debug(f"Referenced message: '{referenced_message[:50] if referenced_message else None}'")
         handler_logger.debug(f"Context messages count: {len(context_messages) if context_messages else 0}")
-        
+
         # Handle message references (when someone asks the bot to answer someone else's question)
         is_reference_request = False
-        
+
         # Get the classifier LLM client
         handler_logger.debug("Getting classifier LLM client")
         classifier_llm = self.llm_handler.get_llm(self.query_router.classifier_model)
-        
+
         # Get chat history for context
         chat_history = self.chat_history.get_langchain_messages(user_id, channel_id)
         handler_logger.debug(f"Retrieved {len(chat_history) if chat_history else 0} messages from chat history")
-        
+
         # Convert chat history to format needed for query rewriting
         recent_messages = []
         if chat_history:
@@ -103,7 +108,7 @@ class BotHandler:
                 author = "User" if hasattr(msg, "type") and msg.type == "human" else "Max"
                 content = msg.content if hasattr(msg, "content") else ""
                 recent_messages.append({"author": author, "content": content})
-                
+
         # Add thread or reply chain context if available
         if context_messages:
             # Merge context with recent messages, prioritizing context_messages
@@ -113,7 +118,7 @@ class BotHandler:
             )]
             recent_messages = combined_messages[:20]  # Limit to 20 messages to avoid token issues
             handler_logger.debug(f"Combined recent messages count: {len(recent_messages)}")
-        
+
         # If we have a referenced message, we need to handle it appropriately
         if referenced_message:
             handler_logger.debug("Processing referenced message")
@@ -128,7 +133,7 @@ class BotHandler:
                     referenced_message=referenced_message,
                     llm_client=classifier_llm
                 )
-                
+
                 # If query was successfully rewritten, use that
                 if was_rewritten:
                     actual_query = rewritten_query
@@ -152,7 +157,7 @@ class BotHandler:
                 recent_messages=recent_messages,
                 llm_client=classifier_llm
             )
-            
+
             # If query was successfully rewritten, use that
             if was_rewritten:
                 actual_query = rewritten_query
@@ -160,36 +165,21 @@ class BotHandler:
             else:
                 # No referenced message, just use the original content
                 actual_query = message_content
-            
+
         # Check if this is a simple greeting message
         if self._is_greeting(actual_query):
             handler_logger.debug("Message is a greeting, sending greeting response")
             return self._get_greeting_response()
-            
+
         # Route query to appropriate LLM
         handler_logger.debug("Routing query to appropriate LLM")
         provider, model_name, params, is_ai_related = await self.query_router.route_query(actual_query, classifier_llm)
         handler_logger.info(f"Query routed to {provider}/{model_name} (AI-related: {is_ai_related})")
-        
-        # Handle non-AI related queries
-        if not is_ai_related:
-            handler_logger.info("Query classified as non-AI related, returning standard response")
-            non_ai_response = NON_AI_RESPONSE
-            
-            # Add the exchange to chat history
-            self.chat_history.add_exchange(
-                user_id=user_id,
-                channel_id=channel_id,
-                human_message=actual_query,
-                ai_message=non_ai_response
-            )
-            
-            return non_ai_response
-        
+
         # Get the appropriate LLM
         handler_logger.debug(f"Getting LLM: {provider}/{model_name}")
         llm = self.llm_handler.get_llm(model_name=model_name, provider=provider, **params)
-        
+
         # Choose the right prompt template based on provider and request type
         if is_reference_request:
             # Use the special reference handling prompt
@@ -201,23 +191,23 @@ class BotHandler:
         else:
             prompt = get_gemini_prompt(chat_history if chat_history else None)
             handler_logger.debug("Using Gemini prompt")
-        
+
         # Build chain components
         if chat_history:
             chain_input = {"query": actual_query, "chat_history": chat_history}
         else:
             chain_input = {"query": actual_query}
-        
+
         try:
             # Invoke the model and get response
             handler_logger.debug("Invoking LLM")
             chain = prompt | llm
             response = await asyncio.to_thread(chain.invoke, chain_input)
-            
+
             # Process the response content
             response_text = response.content
             handler_logger.debug(f"Got response from LLM ({len(response_text)} chars)")
-            
+
             # Add citations for Perplexity responses
             if provider == "perplexity" and hasattr(response, "additional_kwargs") and "citations" in response.additional_kwargs:
                 citations = response.additional_kwargs.get("citations", [])
@@ -226,11 +216,11 @@ class BotHandler:
                     response_text += "\n\n**Sources:**\n"
                     for i, citation in enumerate(citations, 1):
                         response_text += f"{i}. {citation}\n"
-            
+
             # Save the history using the original message if it's a reference request
             # This helps maintain more natural context in the chat history
             history_message = actual_query
-            
+
             # Add the exchange to chat history
             handler_logger.debug("Adding exchange to chat history")
             self.chat_history.add_exchange(
@@ -239,14 +229,14 @@ class BotHandler:
                 human_message=history_message,
                 ai_message=response_text
             )
-            
+
             return response_text
-            
+
         except Exception as e:
             # Handle errors gracefully
             handler_logger.error(f"Error processing message: {e}", exc_info=True)
             return f"I encountered an issue while processing your question. Could you try rephrasing it? (Error: {str(e)[:100]}...)"
-            
+
     def _is_greeting(self, message: str) -> bool:
         """
         Check if the message is a simple greeting.
@@ -258,12 +248,12 @@ class BotHandler:
             Boolean indicating if the message is a greeting
         """
         message_lower = message.lower().strip()
-        
+
         # If the message is long (more than 5 words), it's not just a greeting
         # This prevents questions that start with "hi" or "hello" from being treated as greetings
         if len(message_lower.split()) > 2:
             return False
-        
+
         # Common greetings to check for
         common_greetings = ["hey", "hello", "hi", "sup", "yo", "greetings", "hiya", "howdy", 
                             "good morning", "good afternoon", "good evening",
@@ -271,28 +261,28 @@ class BotHandler:
                             "what up", "hey there", "hello there", "hi there",
                             "heya", "heyy", "hiii", "hiiii", "heyyy", "hellooo",
                             "wassup", "what is up", "what's happening", "whats happening"]
-        
+
         # Greetings specifically for Max
         max_greetings = ["hey max", "hello max", "hi max", "yo max", "sup max", "howdy max",
                          "hey max!", "hello max!", "hi max!", "what's up max", "whats up max"]
-        
+
         # Check for exact matches
         if message_lower in common_greetings or message_lower in max_greetings:
             return True
-        
+
         # For longer messages, only consider it a greeting if it's very simple
         # Don't check for startswith, as this catches legitimate questions that begin with greetings
         if len(message_lower.split()) <= 3:
             for greeting in ["hey", "hello", "hi", "sup", "yo", "heya"]:
                 if greeting in message_lower:
                     return True
-                    
+
             # Check for mentions of 'max' in short greetings
             if "max" in message_lower and any(greeting in message_lower for greeting in ["hey", "hello", "hi", "sup", "yo"]):
                 return True
-                    
+
         return False
-    
+
     async def _is_reference_request(self, message: str) -> bool:
         """
         Check if the message is asking the bot to address a referenced message.
@@ -304,7 +294,7 @@ class BotHandler:
             Boolean indicating if the message is a reference request
         """
         message_lower = message.lower().strip()
-        
+
         # If the message is very short (just mentioning the bot)
         if len(message_lower) < 5:
             handler_logger.debug("Message too short, treating as reference request")
@@ -312,7 +302,7 @@ class BotHandler:
 
         # Get the classifier LLM client
         classifier_llm = self.llm_handler.get_llm(self.query_router.classifier_model)
-        
+
         # Use the router's coreference detection instead of fixed patterns
         try:
             handler_logger.debug("Checking for coreference in message")
@@ -325,7 +315,7 @@ class BotHandler:
             basic_check = "this" in message_lower and len(message_lower.split()) < 10
             handler_logger.debug(f"Falling back to basic coreference check: {basic_check}")
             return basic_check
-        
+
     def _get_greeting_response(self) -> str:
         """
         Get a random friendly greeting response.
@@ -336,7 +326,7 @@ class BotHandler:
         response = random.choice(self.greeting_responses)
         handler_logger.debug(f"Selected greeting response: '{response}'")
         return response
-        
+
     def _get_clarification_question(self, message: str) -> str:
         """
         Select an appropriate clarification question based on message content.
@@ -349,7 +339,7 @@ class BotHandler:
         """
         # Get the classifier LLM client
         classifier_llm = self.llm_handler.get_llm(self.query_router.classifier_model)
-        
+
         # Define the classification prompt
         classification_prompt = f"""
         Classify the following message into one of these categories:
@@ -362,22 +352,22 @@ class BotHandler:
         Message: {message}
         
         Category:"""
-        
+
         try:
             # Get classification from LLM
             handler_logger.debug("Classifying message for clarification")
             classification_result = classifier_llm.invoke(classification_prompt).content.strip().lower()
-            
+
             # Extract the category from the response
             for category in self.clarification_questions.keys():
                 if category in classification_result:
                     handler_logger.debug(f"Message classified as '{category}' for clarification")
                     return self.clarification_questions[category]
-            
+
             # Default to general if no match found
             handler_logger.debug("No specific category found, using general clarification")
             return self.clarification_questions["general"]
-            
+
         except Exception as e:
             # Handle errors gracefully and default to general question
             handler_logger.error(f"Error classifying message for clarification: {e}")

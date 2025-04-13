@@ -58,9 +58,6 @@ IMPORTANT INSTRUCTION: When a user asks you to help answer someone else's questi
 4. Don't address the person who referenced the question, address your answer as if you're talking directly to the person who asked the original question
 """
 
-# Response message for non-AI related queries
-NON_AI_RESPONSE = "I'm focused on helping with AI and technology topics. Could you ask me something related to these areas? I'd be happy to assist with that! 🤖"
-
 # System prompt for welcoming new users in the intro-yourself channel
 WELCOME_SYSTEM_PROMPT = """You are Max, a friendly and knowledgeable AI assistant for a Discord community called Maxpool which is focused on generative AI. You have been created by the Maxpool community.
 

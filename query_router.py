@@ -5,7 +5,7 @@ This module classifies incoming queries to determine whether they need web resea
 or can be answered with standard model knowledge.
 """
 
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, List, Optional, Callable
 import json
 from logger import router_logger
 
@@ -14,7 +14,52 @@ class QueryRouter:
     Routes queries to the appropriate LLM based on content analysis.
     Uses Perplexity for web research queries, Gemini for standard knowledge.
     """
-    
+
+    # Common greetings list used across methods
+    COMMON_GREETINGS = [
+        "hey",
+        "hello",
+        "hi",
+        "sup",
+        "yo",
+        "greetings",
+        "hiya",
+        "howdy",
+        "hey max",
+        "hello max",
+        "hi max",
+        "yo max",
+        "howdy max",
+        "hey!",
+        "hello!",
+        "hi!",
+        "sup!",
+        "yo!",
+        "howdy!",
+        "good morning",
+        "good afternoon",
+        "good evening",
+        "morning",
+        "afternoon",
+        "evening",
+        "what's up",
+        "whats up",
+        "what up",
+        "hey there",
+        "hello there",
+        "hi there",
+        "heya",
+        "heyy",
+        "hiii",
+        "hiiii",
+        "heyyy",
+        "hellooo",
+        "wassup",
+        "what is up",
+        "what's happening",
+        "whats happening",
+    ]
+
     def __init__(self, 
                  perplexity_model="sonar-pro", 
                  gemini_model="gemini-2.0-flash-001",
@@ -32,6 +77,81 @@ class QueryRouter:
         self.classifier_model = classifier_model
         router_logger.debug(f"QueryRouter initialized with models: perplexity={perplexity_model}, gemini={gemini_model}, classifier={classifier_model}")
 
+    def _is_greeting(self, query: str) -> bool:
+        """
+        Check if a query is a common greeting.
+
+        Args:
+            query: The user's message
+
+        Returns:
+            Boolean indicating if the query is a greeting
+        """
+        query_lower = query.lower().strip()
+
+        # Check if the query exactly matches a greeting
+        if query_lower in self.COMMON_GREETINGS:
+            return True
+
+        # Check if the query starts with a greeting
+        for greeting in self.COMMON_GREETINGS:
+            if query_lower.startswith(greeting + " "):
+                return True
+
+        # Check for short queries that might be conversational starters
+        if len(query_lower.split()) <= 3:
+            # Additional check for variations of greetings with emojis or punctuation
+            for greeting in ["hey", "hello", "hi", "sup", "yo", "heya"]:
+                if greeting in query_lower:
+                    return True
+
+        return False
+
+    async def _process_llm_response(
+        self, response, expected_keys: List[str], default_values: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Process LLM response and handle JSON parsing with fallback logic.
+
+        Args:
+            response: The response from the LLM
+            expected_keys: List of keys expected in the JSON response
+            default_values: Dictionary of default values for keys
+
+        Returns:
+            Dictionary with parsed values or defaults
+        """
+        try:
+            response_text = response.content
+
+            try:
+                result = json.loads(response_text)
+                return {
+                    key: result.get(key, default_values[key]) for key in expected_keys
+                }
+            except json.JSONDecodeError:
+                # Fallback if LLM doesn't return valid JSON
+                router_logger.warning(
+                    "Failed to parse JSON response from LLM, using fallback"
+                )
+                result = {}
+                for key in expected_keys:
+                    # Check if the key and "true" are both in the response text
+                    result[key] = (
+                        "true" in response_text.lower() and key in response_text.lower()
+                    )
+                    # If the default is True but the response mentions "false" with the key, override to False
+                    if (
+                        default_values[key] is True
+                        and "false" in response_text.lower()
+                        and key in response_text.lower()
+                    ):
+                        result[key] = False
+                return result
+        except Exception as e:
+            router_logger.error(f"Error processing LLM response: {e}", exc_info=True)
+            return default_values
+
     async def classify_with_llm(self, query: str, client) -> Dict:
         """
         Use an LLM to determine if a query requires web research and if it's AI-related.
@@ -46,6 +166,12 @@ class QueryRouter:
                 - is_ai_related: Boolean indicating if the query is related to AI/technology
         """
         router_logger.debug(f"Classifying query: '{query[:50]}...'")
+
+        # Check for common greetings first - these don't need web research
+        if self._is_greeting(query):
+            router_logger.debug("Query is a common greeting, no web research needed")
+            return {"needs_web_research": False, "is_ai_related": True}
+
         prompt = f"""
         You are Max, an AI assistant for the Maxpool Discord server focused on generative AI topics. You have been created by the Maxpool community.
         
@@ -72,30 +198,18 @@ class QueryRouter:
         1. "needs_web_research": boolean value (true/false)
         2. "is_ai_related": boolean value (true/false)
         """
-        
+
         try:
             router_logger.debug("Invoking LLM for query classification")
             response = client.invoke(prompt)
-            # Extract the content from the response object
-            response_text = response.content
-            
-            try:
-                result = json.loads(response_text)
-                router_logger.debug(f"Classification result: web_research={result.get('needs_web_research', False)}, ai_related={result.get('is_ai_related', True)}")
-                return {
-                    "needs_web_research": result.get("needs_web_research", False),
-                    "is_ai_related": result.get("is_ai_related", True)  # Default to True for backward compatibility
-                }
-            except json.JSONDecodeError:
-                # Fallback if LLM doesn't return valid JSON
-                router_logger.warning("Failed to parse JSON response from LLM, using fallback classification")
-                needs_web_research = "true" in response_text.lower() and "needs_web_research" in response_text.lower()
-                is_ai_related = not ("false" in response_text.lower() and "is_ai_related" in response_text.lower())
-                router_logger.debug(f"Fallback classification: web_research={needs_web_research}, ai_related={is_ai_related}")
-                return {
-                    "needs_web_research": needs_web_research,
-                    "is_ai_related": is_ai_related
-                }
+
+            expected_keys = ["needs_web_research", "is_ai_related"]
+            default_values = {"needs_web_research": False, "is_ai_related": True}
+
+            return await self._process_llm_response(
+                response, expected_keys, default_values
+            )
+
         except Exception as e:
             router_logger.error(f"Error classifying query: {e}", exc_info=True)
             return {
@@ -120,15 +234,15 @@ class QueryRouter:
         """
         router_logger.debug(f"Routing query: '{query[:50]}...'")
         classification = await self.classify_with_llm(query, llm_client)
-        
+
         # Check if query is AI/technology related
         is_ai_related = classification.get("is_ai_related", True)
-        
+
         # If non-AI query, return Google with default parameters and is_ai_related = False
         if not is_ai_related:
             router_logger.info("Query classified as non-AI related, routing to Google")
             return "google", self.gemini_model, {"temperature": 0.2}, False
-            
+
         # For AI-related queries, route based on web research needs
         if classification.get("needs_web_research", False):
             router_logger.info("Query needs web research, routing to Perplexity")
@@ -136,7 +250,7 @@ class QueryRouter:
         else:
             router_logger.info("Query does not need web research, routing to Google")
             return "google", self.gemini_model, {"temperature": 0.2}, True
-    
+
     async def should_ask_clarification(self, query: str, llm_client) -> bool:
         """
         Uses LLM to determine if the query is too vague and requires clarification.
@@ -149,36 +263,19 @@ class QueryRouter:
             Boolean indicating if clarification is needed
         """
         router_logger.debug(f"Checking if query needs clarification: '{query[:50]}...'")
+
         # Check for common greetings first - never ask for clarification for these
-        query_lower = query.lower().strip()
-        common_greetings = ["hey", "hello", "hi", "sup", "yo", "greetings", "hiya", "howdy", 
-                            "hey max", "hello max", "hi max", "yo max", "howdy max",
-                            "hey!", "hello!", "hi!", "sup!", "yo!", "howdy!", 
-                            "good morning", "good afternoon", "good evening",
-                            "morning", "afternoon", "evening", "what's up", "whats up",
-                            "what up", "hey there", "hello there", "hi there",
-                            "heya", "heyy", "hiii", "hiiii", "heyyy", "hellooo",
-                            "wassup", "what is up", "what's happening", "whats happening"]
-        
-        # Check if the query exactly matches a greeting or starts with a greeting
-        if query_lower in common_greetings:
-            router_logger.debug("Query is a common greeting, no clarification needed")
+        if self._is_greeting(query):
+            router_logger.debug("Query is a greeting, no clarification needed")
             return False
-            
-        # Check if the query starts with a greeting
-        for greeting in common_greetings:
-            if query_lower.startswith(greeting + " "):
-                router_logger.debug("Query starts with greeting, no clarification needed")
-                return False
-        
+
         # Check for short queries that might be conversational starters
-        if len(query_lower.split()) <= 3:
-            # Additional check for variations of greetings with emojis or punctuation
-            for greeting in ["hey", "hello", "hi", "sup", "yo", "heya"]:
-                if greeting in query_lower:
-                    router_logger.debug("Short query contains greeting, no clarification needed")
-                    return False
-        
+        if len(query.strip().split()) <= 3:
+            router_logger.debug(
+                "Short query, potential greeting, no clarification needed"
+            )
+            return False
+
         prompt = f"""
         Determine if the following user query is too vague and requires clarification before providing a helpful response.
         
@@ -197,24 +294,19 @@ class QueryRouter:
             "needs_clarification": true/false
         }}
         """
-        
+
         try:
             router_logger.debug("Invoking LLM to determine if clarification is needed")
             response = llm_client.invoke(prompt)
-            # Extract the content from the response object
-            response_text = response.content
-            
-            try:
-                result = json.loads(response_text)
-                needs_clarification = result.get("needs_clarification", False)
-                router_logger.debug(f"Clarification needed: {needs_clarification}")
-                return needs_clarification
-            except json.JSONDecodeError:
-                # Fallback if LLM doesn't return valid JSON
-                router_logger.warning("Failed to parse JSON response from LLM, using fallback for clarification check")
-                needs_clarification = "true" in response_text.lower() and "needs_clarification" in response_text.lower()
-                router_logger.debug(f"Fallback clarification check: {needs_clarification}")
-                return needs_clarification
+
+            expected_keys = ["needs_clarification"]
+            default_values = {"needs_clarification": False}
+
+            result = await self._process_llm_response(
+                response, expected_keys, default_values
+            )
+            return result.get("needs_clarification", False)
+
         except Exception as e:
             router_logger.error(f"Error checking for clarification need: {e}", exc_info=True)
             return False
@@ -236,7 +328,7 @@ class QueryRouter:
         if len(message.strip()) < 5:
             router_logger.debug("Message too short, treating as coreference")
             return True
-            
+
         prompt = f"""
         Determine if the following message contains coreferences that would benefit from additional context.
         
@@ -255,23 +347,19 @@ class QueryRouter:
             "is_coreference": true/false
         }}
         """
-        
+
         try:
             router_logger.debug("Invoking LLM for coreference detection")
             response = llm_client.invoke(prompt)
-            response_text = response.content
-            
-            try:
-                result = json.loads(response_text)
-                is_coreference = result.get("is_coreference", False)
-                router_logger.debug(f"Coreference detection result: {is_coreference}")
-                return is_coreference
-            except json.JSONDecodeError:
-                # Fallback if LLM doesn't return valid JSON
-                router_logger.warning("Failed to parse JSON response from LLM, using fallback for coreference detection")
-                is_coreference = "true" in response_text.lower() and "is_coreference" in response_text.lower()
-                router_logger.debug(f"Fallback coreference detection: {is_coreference}")
-                return is_coreference
+
+            expected_keys = ["is_coreference"]
+            default_values = {"is_coreference": False}
+
+            result = await self._process_llm_response(
+                response, expected_keys, default_values
+            )
+            return result.get("is_coreference", False)
+
         except Exception as e:
             router_logger.error(f"Error detecting coreference: {e}", exc_info=True)
             return False 

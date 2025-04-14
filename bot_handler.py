@@ -209,13 +209,13 @@ class BotHandler:
             handler_logger.debug(f"Got response from LLM ({len(response_text)} chars)")
 
             # Add citations for Perplexity responses
-            if provider == "perplexity" and hasattr(response, "additional_kwargs") and "citations" in response.additional_kwargs:
-                citations = response.additional_kwargs.get("citations", [])
-                if citations:
-                    handler_logger.debug(f"Adding {len(citations)} citations to response")
-                    response_text += "\n\n**Sources:**\n"
-                    for i, citation in enumerate(citations, 1):
-                        response_text += f"{i}. {citation}\n"
+            # if provider == "perplexity" and hasattr(response, "additional_kwargs") and "citations" in response.additional_kwargs:
+            #     citations = response.additional_kwargs.get("citations", [])
+            #     if citations:
+            #         handler_logger.debug(f"Adding {len(citations)} citations to response")
+            #         response_text += "\n\n**Sources:**\n"
+            #         for i, citation in enumerate(citations, 1):
+            #             response_text += f"{i}. {citation}\n"
 
             # Save the history using the original message if it's a reference request
             # This helps maintain more natural context in the chat history

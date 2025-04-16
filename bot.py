@@ -9,6 +9,9 @@ from bot_handler import BotHandler
 from logger import setup_logging, bot_logger
 from prompts import get_welcome_prompt
 
+# ID of the specific server where the bot should respond
+ALLOWED_GUILD_ID = 1345864769806274661
+
 def parse_arguments():
     """Parse command line arguments for the bot"""
     parser = argparse.ArgumentParser(description="Max Discord Bot")
@@ -50,6 +53,13 @@ async def on_message(message):
     """Process incoming Discord messages."""
     # Ignore messages from the bot itself
     if message.author == client.user:
+        return
+
+    # Check if message is from the allowed server (guild)
+    if message.guild is None or message.guild.id != ALLOWED_GUILD_ID:
+        bot_logger.debug(
+            f"Ignoring message from server ID {message.guild.id if message.guild else 'DM'}"
+        )
         return
 
     # Get user and channel IDs as strings
@@ -262,41 +272,48 @@ async def send_chunked_response(message, response, thread=None):
 async def process_welcome_message(message, thread_name_template):
     """Process messages in welcome-enabled channels and generate welcome responses."""
     try:
+        # Check if message is from the allowed server (guild)
+        if message.guild is None or message.guild.id != ALLOWED_GUILD_ID:
+            bot_logger.debug(
+                f"Ignoring welcome message from server ID {message.guild.id if message.guild else 'DM'}"
+            )
+            return
+
         # Get the user's introduction message
         introduction = message.content
-        
+
         # Get the classifier LLM client for generating the welcome
         classifier_llm = bot_handler.llm_handler.get_llm(bot_handler.query_router.classifier_model)
-        
+
         # Create welcome prompt
         welcome_prompt = get_welcome_prompt()
-        
+
         # Build chain components with additional metadata
         chain_input = {
             "query": introduction,
             "username": message.author.display_name,
             "channel": message.channel.name
         }
-        
+
         # Show typing indicator while processing
         async with message.channel.typing():
             # Invoke the model and get response
             chain = welcome_prompt | classifier_llm
             response = await asyncio.to_thread(chain.invoke, chain_input)
-            
+
             # Create a friendly thread name for the welcome
             thread_name = thread_name_template.format(username=message.author.display_name)
-            
+
             # Create a thread for the welcome message
             bot_logger.debug(f"Creating welcome thread: '{thread_name}'")
             thread = await message.create_thread(
                 name=thread_name,
                 auto_archive_duration=1440  # Auto-archive after 24 hours
             )
-            
+
             # Send the welcome message in the thread
             await thread.send(response.content)
-            
+
     except Exception as e:
         bot_logger.error(f"Error processing welcome message: {e}", exc_info=True)
         # Don't send error message to avoid disrupting the introduction flow

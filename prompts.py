@@ -40,6 +40,14 @@ Respond without preambles like "As an AI assistant" or "Here's the information".
 Remember, you don't need to provide web-based research as you're using your existing knowledge to answer queries.
 """
 
+# Channel-specific extension for Gemini system prompt
+GEMINI_CHANNEL_PROMPT = """
+You are currently responding in the {channel_name} channel.
+Channel description: {channel_description}
+
+Tailor your responses to be especially relevant to this channel's focus while maintaining your helpful personality.
+"""
+
 # System prompt for research queries (Perplexity)
 PERPLEXITY_SYSTEM_PROMPT = """You are Max, a friendly and knowledgeable AI assistant for a Discord community focused on generative AI. You have been created by the Maxpool community.
 
@@ -49,6 +57,14 @@ Your personality:
     - Do NOT mention any citations in your responses
 - Tech-savvy with deep understanding of AI concepts, tools, and research
 - Fun, casual, and engaging
+"""
+
+# Channel-specific extension for Perplexity system prompt
+PERPLEXITY_CHANNEL_PROMPT = """
+You are currently responding in the {channel_name} channel.
+Channel description: {channel_description}
+
+Tailor your web research and responses to be especially relevant to this channel's focus while maintaining your helpful personality.
 """
 
 # Reference handling prompt addition - append to system prompts when handling references
@@ -65,7 +81,8 @@ WELCOME_SYSTEM_PROMPT = """You are Max, a friendly and knowledgeable AI assistan
 
 Your task:
 - Generate a welcome message only if they introduced themselves otherwise adjust accordingly
-- The welcome message should sound cool and engaging 
+- First line of the welcome message should sound cool and engaging 
+- Dont repeat what they said in their introduction, make it fun and related to the community
 - Be friendly, and use a conversational tone
 - Use relevant emojis to convey enthusiasm but keep it tasteful
 - Briefly mention your purpose (you help with AI related questions)
@@ -74,16 +91,17 @@ Your task:
 - Tell them they can interact with you in any channel by mentioning @Max or replying to your message
 
 Tell them that they can check out the following channels to get started as per their interests:
-⁠ai-news-n-gossip - Latest AI news, announcements, and industry gossip
-⁠engineering - Technical discussions about AI implementation and engineering
-⁠research-papers - Share and discuss academic papers and research
-⁠ai-tools-n-tricks - Tips, tricks, and tools for working with AI
-⁠ai-models - Discussions about specific AI models and their capabilities
-⁠business-of-ai - Business aspects, startups, and commercial applications of AI
-⁠job-openings-interview-tips  - Career opportunities and interview experiences
-⁠showcase-work - Share your projects, portfolios, and accomplishments
-⁠all-about-agents - Discussions focused on AI agent engineering
-⁠test-max - Test our AI assistant Max
+#⁠ai-news-n-gossip - Latest AI news, announcements, and industry gossip
+#⁠engineering - Technical discussions about AI implementation and engineering
+#⁠research-papers - Share and discuss academic papers and research
+#⁠ai-tools-n-tricks - Tips, tricks, and tools for working with AI
+#⁠ai-models - Discussions about specific AI models and their capabilities
+#⁠business-of-ai - Business aspects, startups, and commercial applications of AI
+#share-⁠job-openings  - Career opportunities and interview experiences
+#⁠showcase-work - Share your projects, portfolios, and accomplishments
+#⁠all-about-agents - Discussions focused on AI agent engineering
+#ai-in-healthcare - AI advancements in healthcare
+#⁠test-max - Test our AI assistant Max
 
 Remember, this is their first interaction with you, so make a good impression!
 """
@@ -91,20 +109,33 @@ Remember, this is their first interaction with you, so make a good impression!
 # Note: This prompt should NOT be used for greetings like "hey", "hello", "hi", etc.
 # For greetings, use the greeting responses in BotHandler.greeting_responses instead.
 
-def get_gemini_prompt(chat_history: Optional[List] = None) -> ChatPromptTemplate:
+
+def get_gemini_prompt(
+    chat_history: Optional[List] = None, channel_info: Optional[dict] = None
+) -> ChatPromptTemplate:
     """
     Creates a ChatPromptTemplate for Gemini model.
-    
+
     Args:
         chat_history: Optional list of previous messages
-        
+        channel_info: Optional dictionary with channel information (name, description)
+
     Returns:
         ChatPromptTemplate configured for Gemini
     """
+    # Add channel-specific context if available
+    system_prompt = GEMINI_SYSTEM_PROMPT
+    if channel_info and channel_info.get("name") and channel_info.get("description"):
+        channel_prompt = GEMINI_CHANNEL_PROMPT.format(
+            channel_name=channel_info.get("name", ""),
+            channel_description=channel_info.get("description", ""),
+        )
+        system_prompt = system_prompt + channel_prompt
+
     if chat_history:
         return ChatPromptTemplate.from_messages(
             [
-                SystemMessagePromptTemplate.from_template(GEMINI_SYSTEM_PROMPT),
+                SystemMessagePromptTemplate.from_template(system_prompt),
                 MessagesPlaceholder(variable_name="chat_history"),
                 HumanMessagePromptTemplate.from_template("{query}"),
             ]
@@ -112,25 +143,38 @@ def get_gemini_prompt(chat_history: Optional[List] = None) -> ChatPromptTemplate
     else:
         return ChatPromptTemplate.from_messages(
             [
-                SystemMessagePromptTemplate.from_template(GEMINI_SYSTEM_PROMPT),
+                SystemMessagePromptTemplate.from_template(system_prompt),
                 HumanMessagePromptTemplate.from_template("{query}"),
             ]
         )
 
-def get_perplexity_prompt(chat_history: Optional[List] = None) -> ChatPromptTemplate:
+
+def get_perplexity_prompt(
+    chat_history: Optional[List] = None, channel_info: Optional[dict] = None
+) -> ChatPromptTemplate:
     """
     Creates a ChatPromptTemplate for Perplexity model.
-    
+
     Args:
         chat_history: Optional list of previous messages
-        
+        channel_info: Optional dictionary with channel information (name, description)
+
     Returns:
         ChatPromptTemplate configured for Perplexity
     """
+    # Add channel-specific context if available
+    system_prompt = PERPLEXITY_SYSTEM_PROMPT
+    if channel_info and channel_info.get("name") and channel_info.get("description"):
+        channel_prompt = PERPLEXITY_CHANNEL_PROMPT.format(
+            channel_name=channel_info.get("name", ""),
+            channel_description=channel_info.get("description", ""),
+        )
+        system_prompt = system_prompt + channel_prompt
+
     if chat_history:
         return ChatPromptTemplate.from_messages(
             [
-                SystemMessagePromptTemplate.from_template(PERPLEXITY_SYSTEM_PROMPT),
+                SystemMessagePromptTemplate.from_template(system_prompt),
                 MessagesPlaceholder(variable_name="chat_history"),
                 HumanMessagePromptTemplate.from_template("{query}"),
             ]
@@ -138,10 +182,11 @@ def get_perplexity_prompt(chat_history: Optional[List] = None) -> ChatPromptTemp
     else:
         return ChatPromptTemplate.from_messages(
             [
-                SystemMessagePromptTemplate.from_template(PERPLEXITY_SYSTEM_PROMPT),
+                SystemMessagePromptTemplate.from_template(system_prompt),
                 HumanMessagePromptTemplate.from_template("{query}"),
             ]
         )
+
 
 def get_clarification_message() -> str:
     """
@@ -153,23 +198,54 @@ def get_clarification_message() -> str:
     clarification_msg = "I'd like to help, but could you provide a bit more information so I can give you the best response? Specifically, could you tell me "
     return clarification_msg
 
-def get_reference_prompt(provider: str, chat_history: Optional[List] = None) -> ChatPromptTemplate:
+
+def get_reference_prompt(
+    provider: str,
+    chat_history: Optional[List] = None,
+    channel_info: Optional[dict] = None,
+) -> ChatPromptTemplate:
     """
     Creates a ChatPromptTemplate for handling referenced messages.
-    
+
     Args:
         provider: LLM provider ("google" or "perplexity")
         chat_history: Optional list of previous messages
-        
+        channel_info: Optional dictionary with channel information (name, description)
+
     Returns:
         ChatPromptTemplate configured for reference handling
     """
     # Choose the base system prompt based on provider
     if provider == "perplexity":
-        system_prompt = PERPLEXITY_SYSTEM_PROMPT + REFERENCE_HANDLING_PROMPT
+        system_prompt = PERPLEXITY_SYSTEM_PROMPT
+        # Add channel-specific context if available
+        if (
+            channel_info
+            and channel_info.get("name")
+            and channel_info.get("description")
+        ):
+            channel_prompt = PERPLEXITY_CHANNEL_PROMPT.format(
+                channel_name=channel_info.get("name", ""),
+                channel_description=channel_info.get("description", ""),
+            )
+            system_prompt = system_prompt + channel_prompt
     else:
-        system_prompt = GEMINI_SYSTEM_PROMPT + REFERENCE_HANDLING_PROMPT
-        
+        system_prompt = GEMINI_SYSTEM_PROMPT
+        # Add channel-specific context if available
+        if (
+            channel_info
+            and channel_info.get("name")
+            and channel_info.get("description")
+        ):
+            channel_prompt = GEMINI_CHANNEL_PROMPT.format(
+                channel_name=channel_info.get("name", ""),
+                channel_description=channel_info.get("description", ""),
+            )
+            system_prompt = system_prompt + channel_prompt
+
+    # Add reference handling prompt
+    system_prompt = system_prompt + REFERENCE_HANDLING_PROMPT
+
     if chat_history:
         return ChatPromptTemplate.from_messages(
             [
@@ -185,6 +261,7 @@ def get_reference_prompt(provider: str, chat_history: Optional[List] = None) -> 
                 HumanMessagePromptTemplate.from_template("{query}"),
             ]
         )
+
 
 def get_welcome_prompt() -> ChatPromptTemplate:
     """

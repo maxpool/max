@@ -60,18 +60,21 @@ class BotHandler:
         ]
         handler_logger.debug("BotHandler initialized with all components")
 
-    async def process_message(self, 
-                             user_id: str, 
-                             channel_id: str, 
-                             message_content: str,
-                             is_clarification: bool = False,
-                             is_reply: bool = False,
-                             referenced_message: str = None,
-                             referenced_user_id: str = None,
-                             context_messages: list = None) -> str:
+    async def process_message(
+        self,
+        user_id: str,
+        channel_id: str,
+        message_content: str,
+        is_clarification: bool = False,
+        is_reply: bool = False,
+        referenced_message: str = None,
+        referenced_user_id: str = None,
+        context_messages: list = None,
+        channel_info: dict = None,
+    ) -> str:
         """
         Process incoming Discord message and generate a response.
-        
+
         Args:
             user_id: Discord user ID
             channel_id: Discord channel ID
@@ -81,7 +84,8 @@ class BotHandler:
             referenced_message: Content of the message being referenced/replied to
             referenced_user_id: User ID of the person who sent the referenced message
             context_messages: List of thread or reply chain messages for additional context
-            
+            channel_info: Dictionary containing channel name and description
+
         Returns:
             Bot's response message
         """
@@ -89,6 +93,10 @@ class BotHandler:
         handler_logger.debug(f"Processing message from user {user_id}: '{message_content[:50]}...'")
         handler_logger.debug(f"Referenced message: '{referenced_message[:50] if referenced_message else None}'")
         handler_logger.debug(f"Context messages count: {len(context_messages) if context_messages else 0}")
+        if channel_info:
+            handler_logger.debug(
+                f"Channel info: {channel_info.get('name', 'unknown')} - {channel_info.get('description', 'no description')[:50]}..."
+            )
 
         # Handle message references (when someone asks the bot to answer someone else's question)
         is_reference_request = False
@@ -183,13 +191,19 @@ class BotHandler:
         # Choose the right prompt template based on provider and request type
         if is_reference_request:
             # Use the special reference handling prompt
-            prompt = get_reference_prompt(provider, chat_history if chat_history else None)
+            prompt = get_reference_prompt(
+                provider, chat_history if chat_history else None, channel_info
+            )
             handler_logger.debug("Using reference prompt")
         elif provider == "perplexity":
-            prompt = get_perplexity_prompt(chat_history if chat_history else None)
+            prompt = get_perplexity_prompt(
+                chat_history if chat_history else None, channel_info
+            )
             handler_logger.debug("Using Perplexity prompt")
         else:
-            prompt = get_gemini_prompt(chat_history if chat_history else None)
+            prompt = get_gemini_prompt(
+                chat_history if chat_history else None, channel_info
+            )
             handler_logger.debug("Using Gemini prompt")
 
         # Build chain components

@@ -69,7 +69,7 @@ async def on_message(message):
     bot_logger.debug(f"Received message from {message.author.display_name} ({user_id}): '{message.content[:50]}...' in channel {channel_id}")
 
     # Special handling for intro-yourself
-    if message.channel.name == "intro-yourself":
+    if channel_id == "1359368696329539635":
         bot_logger.info(
             f"Processing welcome message for new user {message.author.display_name} in intro-yourself channel"
         )
@@ -97,6 +97,20 @@ async def on_message(message):
     existing_thread = None
     thread_history = []
     reply_chain = []
+
+    # Get channel information
+    channel_info = {
+        "name": message.channel.name if hasattr(message.channel, "name") else "Unknown",
+        "description": (
+            message.channel.topic
+            if hasattr(message.channel, "topic") and message.channel.topic
+            else "No description"
+        ),
+    }
+
+    bot_logger.debug(
+        f"Channel info: {channel_info['name']} - {channel_info['description'][:50] if channel_info['description'] else 'No description'}"
+    )
 
     # Collect thread history if we're in a thread
     if in_thread:
@@ -212,7 +226,8 @@ async def on_message(message):
                     is_reply=reply_to_bot,
                     referenced_message=referenced_content,
                     referenced_user_id=referenced_user_id,
-                    context_messages=context_messages
+                    context_messages=context_messages,
+                    channel_info=channel_info,
                 )
 
                 # Check if response is asking for clarification

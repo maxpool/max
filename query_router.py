@@ -362,4 +362,76 @@ class QueryRouter:
 
         except Exception as e:
             router_logger.error(f"Error detecting coreference: {e}", exc_info=True)
-            return False 
+            return False
+
+    async def should_reply_in_thread(
+        self, message: str, context_messages: list, llm_client
+    ) -> bool:
+        """
+        Determine if a message in a thread is addressed to the bot and requires a response.
+
+        Args:
+            message: The user's message
+            context_messages: Recent messages in the thread for context
+            llm_client: The LLM client to use for classification
+
+        Returns:
+            Boolean indicating if the bot should respond to this message
+        """
+        router_logger.debug(f"Checking if bot should reply to: '{message[:50]}...'")
+
+        # Always reply to direct questions and commands
+        if message.lower().startswith("@max"):
+            router_logger.debug(
+                "Message is a question or direct address to Max, should reply"
+            )
+            return True
+
+        prompt = f"""
+        Analyze this message in a thread to determine if it requires a response from Max (an AI assistant).
+        
+        Message: "{message}"
+        
+        Recent thread context (newest last):
+        {json.dumps([f"{msg['author']}: {msg['content'][:100]}..." for msg in context_messages[-5:] if msg])}
+        
+        Determine if:
+        - The message is asking Max a follow-up question
+        - The message is directly addressing Max
+        - The message contains a command or request for Max
+        - The message is expecting a response from Max
+        
+        DO NOT respond if:
+        - The message is clearly addressed to another person
+        - The message is a thank you or acknowledgment of Max's previous response
+        - The message is users talking to each other (not to Max)
+        - The message appears to be part of a conversation between users
+        - The message is just sharing information without asking anything
+        
+        IMPORTANT: Respond with ONLY a JSON object and NOTHING ELSE:
+        {{
+            "should_reply": true/false
+        }}
+        """
+
+        try:
+            router_logger.debug("Invoking LLM to check if message requires a response")
+            response = llm_client.invoke(prompt)
+
+            expected_keys = ["should_reply"]
+            default_values = {"should_reply": True}  # Default to replying if unsure
+
+            result = await self._process_llm_response(
+                response, expected_keys, default_values
+            )
+            router_logger.debug(
+                f"Should reply determination: {result.get('should_reply', True)}"
+            )
+            return result.get("should_reply", True)
+
+        except Exception as e:
+            router_logger.error(
+                f"Error determining if bot should reply: {e}", exc_info=True
+            )
+            # Default to replying if there's an error
+            return True

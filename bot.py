@@ -216,6 +216,48 @@ async def on_message(message):
     if should_respond:
         bot_logger.info(f"Processing message from user {user_id}: '{content[:50]}...'")
 
+        # For messages in max_initiated_threads, check if we should actually respond
+        # Only apply this to regular messages in threads, not to direct replies or mentions
+        if (
+            in_thread
+            and str(message.channel.id) in max_initiated_threads
+            and client.user not in message.mentions
+            and not reply_to_bot
+        ):
+            bot_logger.debug(
+                "Checking if this thread message requires a response from Max"
+            )
+            # Get the classifier LLM client
+            classifier_llm = bot_handler.llm_handler.get_llm(
+                bot_handler.query_router.classifier_model
+            )
+
+            # Use thread_history if available, otherwise use reply_chain for context
+            context_messages = thread_history if thread_history else reply_chain
+
+            # Check if the message requires a response
+            should_respond = await bot_handler.query_router.should_reply_in_thread(
+                message=content,
+                context_messages=context_messages,
+                llm_client=classifier_llm,
+            )
+
+            if not should_respond:
+                bot_logger.info(
+                    f"Skipping response as message doesn't appear to be addressed to Max: '{content[:50]}...'"
+                )
+                # Log some context about the message for debugging
+                if context_messages and len(context_messages) > 0:
+                    last_few = context_messages[-min(3, len(context_messages)) :]
+                    context_summary = " | ".join(
+                        [
+                            f"{msg.get('author', 'Unknown')}: {msg.get('content', '')[:30]}..."
+                            for msg in last_few
+                        ]
+                    )
+                    bot_logger.debug(f"Recent context: {context_summary}")
+                return
+
         # Generate thread name from content for new threads
         thread_name = f"{message.author.display_name}'s question"
         if content and len(content) > 5:

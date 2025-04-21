@@ -12,6 +12,9 @@ from prompts import get_welcome_prompt
 # ID of the specific server where the bot should respond
 ALLOWED_GUILD_ID = 1345864769806274661
 
+# Set to track thread IDs that were initiated with a mention to Max
+max_initiated_threads = set()
+
 def parse_arguments():
     """Parse command line arguments for the bot"""
     parser = argparse.ArgumentParser(description="Max Discord Bot")
@@ -201,6 +204,14 @@ async def on_message(message):
             except Exception as e:
                 bot_logger.error(f"Error building context from history: {e}")
 
+    # Case 5: Message in a thread that was initiated with a bot mention
+    elif in_thread and str(message.channel.id) in max_initiated_threads:
+        should_respond = True
+        content = message.content.strip()
+        bot_logger.debug(
+            f"Message is in a thread that was initiated with a bot mention: {message.channel.id}"
+        )
+
     # If the message should be processed
     if should_respond:
         bot_logger.info(f"Processing message from user {user_id}: '{content[:50]}...'")
@@ -248,6 +259,14 @@ async def on_message(message):
                         name=thread_name,
                         auto_archive_duration=1440  # Auto-archive after 24 hours
                     )
+
+                    # Add thread ID to max_initiated_threads if bot was mentioned
+                    if client.user in message.mentions:
+                        thread_id = str(thread.id)
+                        max_initiated_threads.add(thread_id)
+                        bot_logger.debug(
+                            f"Added thread {thread_id} to max_initiated_threads"
+                        )
 
                     # Add the initial response to the thread
                     await send_chunked_response(message, response, thread=thread)
